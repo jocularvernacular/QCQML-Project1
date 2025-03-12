@@ -1,7 +1,6 @@
 import numpy as np
 from math import sqrt
 
-# Set up the basis vectors
 basis_0, basis_1 = np.array([1, 0]), np.array([0, 1])
 Pauli_X = np.array([[0, 1], [1, 0]])
 Pauli_Y = np.array([[0, -1j], [1j, 0]])
@@ -85,14 +84,6 @@ def measure(state, basis, shots):
     counts = {}
     for base in basis:
         counts[base] = (results == base).sum()
-        """
-        if(counts[base] == 0):
-            print("ZEEEERO")
-            print("State:")
-            print(state)
-            print("PROBS")
-            print(probabilities)"
-        """
     return counts
 
 bell_hadamard_cnot = apply_hadamard_and_cnot()
@@ -130,14 +121,15 @@ def EW_1(lambd):
 def EW_2(lambd):
     return 2 - sqrt((3 * lambd - 2)**2 + (0.2 * lambd) ** 2)
 
-x = [i / 100 for i in range(100)]
-y_e1 = [EW_1(i) for i in x]
-y_e2 = [EW_2(i) for i in x]
+lambda_range = np.linspace(0.0, 1.0, 30)
+def plot_eigenvalues():
+    y_e1 = [EW_1(i) for i in lambda_range]
+    y_e2 = [EW_2(i) for i in lambda_range]
 
-plt.plot(x, y_e1)
-plt.plot(x, y_e2)
-plt.legend(["E1", "E2"])
-#plt.show()
+    plt.plot(lambda_range, y_e1)
+    plt.plot(lambda_range, y_e2)
+    plt.legend(["E1", "E2"])
+    plt.show()
 
 ### Part c)
 
@@ -154,74 +146,24 @@ c = (V_11 + V_22) / 2
 omega_z = (V_11 - V_22) / 2
 omega_x = V_12
 
-### Qiskit version
-from qiskit import QuantumCircuit
-from qiskit.quantum_info import SparsePauliOp
-from qiskit.circuit import Parameter
-
-ansatz = QuantumCircuit(1)
-ansatz.rx(Parameter("a"), 0)
-ansatz.ry(Parameter("b"), 0)
-
-def create_Hamiltonian(x=0, y=0, z=0, I=0):
-    pauli_terms = []
-    if x != 0:
-        pauli_terms.append(("X", x))
-    if y != 0:
-        pauli_terms.append(("Y", y))
-    if z != 0:
-        pauli_terms.append(("Z", z))
-    if I != 0:
-        pauli_terms.append(("I", z))
-    return SparsePauliOp.from_list(pauli_terms)
-
-
-H_0 = create_Hamiltonian(z=omega, I=eps)
-H_1 = create_Hamiltonian(x=omega_x, z=omega_z, I=c)
-
-# Define the Hamiltonian as a function of lambda
 def H(lambd):
     return H_0 + lambd * H_1
 
-#from qiskit.primitives import StatevectorEstimator
-from qiskit.primitives import StatevectorEstimator
+from scipy.optimize import minimize
 
-def expectation_value(hamiltonian, params):
-    bound_ansatz = ansatz.assign_parameters(params)
-    estimator = StatevectorEstimator()
-    job = estimator.run([(bound_ansatz, hamiltonian)])
-    result = job.result()
-    expectation_value = result[0].data.evs
-    return expectation_value
+def Rx(theta):
+    return np.cos(theta/2) * Id - 1j * np.sin(theta/2) * Pauli_X
 
-from qiskit_algorithms.optimizers import COBYLA
-optimizer = COBYLA(maxiter=100)
-initial_params = np.random.rand(2)
+def Ry(phi):
+    return np.cos(phi/2) * Id - 1j * np.sin(phi/2) * Pauli_Y
 
-def VQE():
-    vals = []
-    for var in x:
-        hamiltonian = H(var)
-        def objective_function(params):
-            return expectation_value(hamiltonian, params)
-        result = optimizer.minimize(objective_function, initial_params)
-        optimized_params = result.x
-        optimized_energy = result.fun
-
-        print("Optimized parameters:", optimized_params)
-        print("Optimized energy (ground state energy):", optimized_energy)
-        vals.append(optimized_energy)
-
-    plt.plot(x, vals)
-
-### Raw version
-def prepare_state(theta, phi, target = None):
+def prepare_state(args):
     state = np.array([1, 0])
-    Rx = np.cos(theta/2) * Id - 1j * np.sin(theta/2) * Pauli_X
-    Ry = np.cos(phi/2) * Id - 1j * np.sin(phi/2) * Pauli_Y
-    state = Ry @ Rx @ state
-    if target is not None:
-        state = target
+    theta = args[0]
+    phi = args[1]
+    rx = Rx(theta)
+    ry = Ry(phi)
+    state = ry @ rx @ state
     return state
 
 def prepare_Hamiltonian(x=0, y=0, z=0, I=0):
@@ -230,12 +172,12 @@ def prepare_Hamiltonian(x=0, y=0, z=0, I=0):
 H_0 = prepare_Hamiltonian(z=omega, I=eps)
 H_1 = prepare_Hamiltonian(x=omega_x, z=omega_z, I=c)
 
-def Hamiltonian(lambd):
+def Hamiltonian(H_0, H_1, lambd):
     return H_0 + lambd * H_1
 
-def get_energy(angles, lmb, number_shots, target = None):
+def get_energy(angles, lmb, number_shots):
     theta, phi = angles[0], angles[1]
-    init_state = prepare_state(theta, phi, target)
+    init_state = prepare_state([theta, phi])
     
     measure_z = measure(init_state, ["0", "1"], number_shots)
     # expected value of Z = (number of 0 measurements - number of 1 measurements)/ number of shots
@@ -271,46 +213,177 @@ def minimize_energy(lmb, number_shots, angles_0, learning_rate, max_epochs):
         epoch += 1
     return angles, epoch, (epoch < max_epochs), energy, delta_energy
 
-number_shots_search = 10_000
-number_shots = 10_000
-learning_rate = 0.3
-max_epochs = 400
-lmbvalues = np.linspace(0.0, 1.0, 30)
-min_energy = np.zeros(len(lmbvalues))
-epochs = np.zeros(len(lmbvalues))
-for index, lmb in enumerate(lmbvalues):
-    memory = 0
-    angles_0 = np.random.uniform(low = 0, high = np.pi, size = 2)
-    angles, epochs[index], converged, energy, delta_energy = minimize_energy(lmb, number_shots_search, angles_0, learning_rate, max_epochs)
-    if epochs[index] < (epochs[index-1] - 5):
-        angles_0 = np.random.uniform(low = 0, high = np.pi, size = 2)
-        angles, epochs[index], converged, energy, delta_energy = minimize_energy(lmb, number_shots_search, angles_0, learning_rate, max_epochs)
-    min_energy[index] = get_energy(angles, lmb, number_shots)
+def minimize_energy_scipy(fnc):
+    number_shots = 10_000
+    lambda_range = np.linspace(0.0, 1.0, 50)
+    min_energy = np.zeros(len(lambda_range))
+    for index, lmb in enumerate(lambda_range):
+        angles_start = np.random.uniform(low = 0, high = np.pi, size = 4)
+        res = minimize(fnc, angles_start, args = (lmb, number_shots), method = 'Powell', options = {'maxiter': 1000}, tol = 1e-5)
+        min_energy[index] = res.fun
+    return min_energy
 
-from scipy.optimize import minimize
-number_shots = 10_000
-lmbvalues_scipy = np.linspace(0.0, 1.0, 50)
-min_energy_scipy = np.zeros(len(lmbvalues_scipy))
-for index, lmb in enumerate(lmbvalues_scipy):
-    angles_start = np.random.uniform(low = 0, high = np.pi, size = 4)
-    res = minimize(get_energy, angles_start, args = (lmb, number_shots), method = 'Powell', options = {'maxiter': 1000}, tol = 1e-5)
-    min_energy_scipy[index] = res.fun
+def find_eigenvalues_scipy(n_angles):
+    eigvals = np.zeros((len(lambda_range), n_angles))
+    for index, lmb in enumerate(lambda_range):
+        H = Hamiltonian(H_0, H_1, lmb)
+        eigen, eigvecs = np.linalg.eigh(H)
+        eigvals[index] = eigen
+    return eigvals
 
-lmbvalues_ana = np.arange(0, 1, 0.01)
-eigvals_ana = np.zeros((len(lmbvalues_ana), 2))
-for index, lmb in enumerate(lmbvalues_ana):
-    H = Hamiltonian(lmb)
-    eigen, eigvecs = np.linalg.eig(H)
-    permute = eigen.argsort()
-    eigvals_ana[index] = eigen[permute]
-    eigvecs = eigvecs[:,permute]
+def VQE(n_angles):
+    number_shots_search = 10_000
+    learning_rate = 0.3
+    max_epochs = 400
+    min_energy = np.zeros(len(lambda_range))
+    epochs = np.zeros(len(lambda_range))
+    for index, lmb in enumerate(lambda_range):
+        memory = 0
+        angles_0 = np.random.uniform(low = 0, high = np.pi, size = n_angles)
+        angles, epochs[index], converged, min_energy[index], delta_energy = minimize_energy(lmb, number_shots_search, angles_0, learning_rate, max_epochs)
+        if epochs[index] < (epochs[index-1] - 5):
+            angles_0 = np.random.uniform(low = 0, high = np.pi, size = n_angles)
+            angles, epochs[index], converged, min_energy[index], delta_energy = minimize_energy(lmb, number_shots_search, angles_0, learning_rate, max_epochs)
+        print(f'Lambda = {lmb}, Energy = {min_energy[index]}, Epochs = {epochs[index]}, Converged = {converged}, Delta Energy = {delta_energy}')
 
+    min_energy_scipy = minimize_energy_scipy(get_energy)
+
+    eigvals_ana = find_eigenvalues_scipy(n_angles)
+
+    fig, axs = plt.subplots(1, 1, figsize=(10, 10))
+    for i in range(n_angles):
+        axs.plot(lambda_range, eigvals_ana[:,i], label=f'$E_{i+1}$')#color = '#4c72b0')
+    axs.scatter(lambda_range, min_energy, label = 'VQE eigenvalues', color = '#dd8452')
+    axs.scatter(lambda_range, min_energy_scipy, label = 'VQE Scipy', color = '#55a868')
+    axs.set_xlabel(r'$\lambda$')
+    axs.set_ylabel('Energy')
+    plt.legend()
+    plt.show()
+
+# Part d)
+Hx = 2.0
+Hz = 3.0
+# H_0
+Energiesnoninteracting = [0.0, 2.5, 6.5, 7.0]
+H_0 = np.diag(Energiesnoninteracting)
+H_1 = Hx * np.kron(Pauli_X, Pauli_X) + Hz * np.kron(Pauli_Z, Pauli_Z)
+
+def trace_out(state, index):
+    density = np.outer(state, np.conj(state))
+    if index == 0:
+        op0 = np.kron(basis_0, Id)
+        op1 = np.kron(basis_1, Id)
+    elif index == 1:
+        op0 = np.kron(Id, basis_0)
+        op1 = np.kron(Id, basis_1)
+    return op0.conj() @ density @ op0.T + op1.conj() @ density @ op1.T # need to take conj() on first and .T on second since np.arrays are 
+
+eigenvalues = []
+entropy = np.zeros((len(lambda_range), 4))
+for index, lmb in enumerate(lambda_range):
+    Hamilt = Hamiltonian(H_0, H_1, lmb)
+    eigvals, eigvecs = np.linalg.eigh(Hamilt)
+    eigenvalues.append(eigvals)
+    for i in range(4):
+        sub_density = trace_out(eigvecs[:, i], 0) # trace out qubit 0 from the ground state
+        lmb_density = np.linalg.eigvalsh(sub_density)
+        lmb_density = np.ma.masked_equal(lmb_density, 0).compressed() # remove zeros to avoid log(0)
+        entropy[index, i] = -np.sum(lmb_density*np.log2(lmb_density))
+eigenvalues = np.array(eigenvalues)
+
+def plot_energies_and_entropy():
+    fig, axs = plt.subplots(1, 1, figsize=(8, 8))
+    for i in range(4):
+        axs.plot(lambda_range, eigenvalues[:, i], label=f'$E_{i}$')
+    axs.set_xlabel(r'$\lambda$')
+    axs.set_ylabel('Energy')
+    axs.legend()
+    plt.show()
+
+    fig, axs = plt.subplots(1, 1, figsize=(8, 8))
+    for i in range(1):
+        axs.plot(lambda_range, entropy[:, i], label=f'$H_{i}$')
+    axs.set_xlabel(r'$\lambda$')
+    axs.set_ylabel('Entropy')
+    axs.legend()
+    plt.show()
+
+# Part e)
+def apply_to_qubit(operator, qubit_index):
+    if qubit_index == 0:
+        return np.kron(operator, np.eye(2))
+    elif qubit_index == 1:
+        return np.kron(np.eye(2), operator)
+    
+CNOT_10 = np.array([[1,0,0,0],
+                 [0,0,0,1],
+                 [0,0,1,0],
+                 [0,1,0,0]])
+SWAP = np.array([[1,0,0,0],
+                 [0,0,1,0],
+                 [0,1,0,0],
+                 [0,0,0,1]])
+
+def prepare_state(args):
+    theta0, phi0, theta1, phi1 = args[0], args[1], args[2], args[3]
+    qubit = np.array([1, 0, 0, 0])
+    Rx0 = Rx(theta0)
+    Ry0 = Ry(phi0)
+    Rx1 = Rx(theta1)
+    Ry1 = Ry(phi1)
+    state = apply_to_qubit(Rx0, 0) @ qubit
+    state = apply_to_qubit(Ry0, 0) @ state
+    state = apply_to_qubit(Rx1, 1) @ state
+    state = apply_to_qubit(Ry1, 1) @ state
+    return CNOT @ state
+
+def get_energy(angles, lmb, number_shots):
+    Hx = 2.0 
+    Hz = 3.0
+    eps00, eps01, eps10, eps11 = np.array([0.0, 2.5, 6.5, 7.0])
+    A = (eps00 + eps01 + eps10 + eps11) / 4.0
+    B = (eps00 - eps01 + eps10 - eps11) / 4.0
+    C = (eps00 + eps01 - eps10 - eps11) / 4.0
+    D = (eps00 - eps01 - eps10 + eps11) / 4.0
+    
+    init_state = prepare_state(angles)
+
+    ZI = np.kron(Pauli_Z, Id)
+
+    qubit = SWAP @ init_state # rotate measurement basis
+    measure_iz = measure(qubit, ["00", "01", "10", "11"], number_shots)
+
+    measure_zi = measure(init_state, ["00", "01", "10", "11"], number_shots)
+    
+    qubit = CNOT_10 @ init_state
+    measure_zz = measure(qubit, ["00", "01", "10", "11"], number_shots)
+    
+    qubit = CNOT_10 @ apply_to_qubit(Hadamard, 1) @ apply_to_qubit(Hadamard, 0) @ init_state
+    measure_xx = measure(qubit, ["00", "01", "10", "11"], number_shots)
+    
+    # expected value of ZI = (#00 + #01 - #10 - #11)/ number of shots
+    exp_vals = np.zeros(4) # do not include the expectation value of II
+    measures = np.array([measure_iz, measure_zi, measure_zz, measure_xx])
+    constants = np.array([B, C, D + lmb*Hz, lmb*Hx])
+    for index in range(len(exp_vals)):
+        exp_vals[index] = measures[index]["00"] + measures[index]["01"] - measures[index]["10"] - measures[index]["11"]
+    exp_val = A + np.sum(constants * exp_vals) / number_shots
+    return exp_val
+
+#VQE(4)
+
+# Part f)
+epsilon = 0.5
+H_0 = epsilon * np.diag([-2, -1, 0, 1, 2])
+
+H_1 = np.zeros((5, 5))
+H_1[2, 0] = np.sqrt(6)
+H_1[3, 1] = 3
+H_1[4, 2] = H_1[2, 0]
+H_1 = H_1 + H_1.T
+
+eigvals = find_eigenvalues_scipy(5)
 fig, axs = plt.subplots(1, 1, figsize=(10, 10))
-for i in range(2):
-    axs.plot(lmbvalues_ana, eigvals_ana[:,i], label=f'$E_{i+1}$', color = '#4c72b0')
-axs.scatter(lmbvalues, min_energy, label = 'VQE eigenvalues', color = '#dd8452')
-axs.scatter(lmbvalues_scipy, min_energy_scipy, label = 'VQE Scipy', color = '#55a868')
-axs.set_xlabel(r'$\lambda$')
-axs.set_ylabel('Energy')
-plt.legend()
+for i in range(5):
+    axs.plot(lambda_range, eigvals[:,i], label=f'$E_{i+1}$')#color = '#4c72b0')
 plt.show()
