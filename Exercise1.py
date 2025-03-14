@@ -215,7 +215,6 @@ def minimize_energy(lmb, number_shots, angles_0, learning_rate, max_epochs):
 
 def minimize_energy_scipy(fnc):
     number_shots = 10_000
-    lambda_range = np.linspace(0.0, 1.0, 50)
     min_energy = np.zeros(len(lambda_range))
     for index, lmb in enumerate(lambda_range):
         angles_start = np.random.uniform(low = 0, high = np.pi, size = 4)
@@ -311,9 +310,9 @@ def plot_energies_and_entropy():
 # Part e)
 def apply_to_qubit(operator, qubit_index):
     if qubit_index == 0:
-        return np.kron(operator, np.eye(2))
+        return np.kron(operator, Id)
     elif qubit_index == 1:
-        return np.kron(np.eye(2), operator)
+        return np.kron(Id, operator)
     
 CNOT_10 = np.array([[1,0,0,0],
                  [0,0,0,1],
@@ -323,6 +322,24 @@ SWAP = np.array([[1,0,0,0],
                  [0,0,1,0],
                  [0,1,0,0],
                  [0,0,0,1]])
+S_dag = np.array([[1, 0], [0, -1j]])
+
+def transform_to_Z_basis(pauli_string):
+    gates = {
+        "X": Hadamard,
+        "ZI": np.kron(Id, Id),
+        "IZ": SWAP,
+        "XI": np.kron(Hadamard, Id),
+        "IX": np.kron(Hadamard, Id) @ SWAP,
+        "YI": np.kron(S_dag @ Hadamard, Id),
+        "IY": np.kron(S_dag @ Hadamard, Id) @ SWAP,
+        "ZZ": CNOT_10,
+        "XX": CNOT_10 @ np.kron(Hadamard, Hadamard),
+        "YY": CNOT_10 @ np.kron(S_dag @ Hadamard, S_dag @ Hadamard),
+        "ZX": CNOT_10 @ np.kron(Id, Hadamard),
+        "XZ": CNOT_10 @ np.kron(Id, Hadamard) @ SWAP
+    }
+    return gates.get(pauli_string, None)
 
 def prepare_state(args):
     theta0, phi0, theta1, phi1 = args[0], args[1], args[2], args[3]
@@ -335,7 +352,7 @@ def prepare_state(args):
     state = apply_to_qubit(Ry0, 0) @ state
     state = apply_to_qubit(Rx1, 1) @ state
     state = apply_to_qubit(Ry1, 1) @ state
-    return CNOT @ state
+    return CNOT @ state # CNOT ensures entanglement
 
 def get_energy(angles, lmb, number_shots):
     Hx = 2.0 
@@ -351,15 +368,15 @@ def get_energy(angles, lmb, number_shots):
     ZI = np.kron(Pauli_Z, Id)
 
     qubit = SWAP @ init_state # rotate measurement basis
-    measure_iz = measure(qubit, ["00", "01", "10", "11"], number_shots)
+    measure_iz = measure(transform_to_Z_basis("IZ") @ init_state, ["00", "01", "10", "11"], number_shots)
 
     measure_zi = measure(init_state, ["00", "01", "10", "11"], number_shots)
     
     qubit = CNOT_10 @ init_state
-    measure_zz = measure(qubit, ["00", "01", "10", "11"], number_shots)
+    measure_zz = measure(transform_to_Z_basis("ZZ") @ init_state, ["00", "01", "10", "11"], number_shots)
     
     qubit = CNOT_10 @ apply_to_qubit(Hadamard, 1) @ apply_to_qubit(Hadamard, 0) @ init_state
-    measure_xx = measure(qubit, ["00", "01", "10", "11"], number_shots)
+    measure_xx = measure(transform_to_Z_basis("XX") @ init_state, ["00", "01", "10", "11"], number_shots)
     
     # expected value of ZI = (#00 + #01 - #10 - #11)/ number of shots
     exp_vals = np.zeros(4) # do not include the expectation value of II
@@ -387,3 +404,37 @@ fig, axs = plt.subplots(1, 1, figsize=(10, 10))
 for i in range(5):
     axs.plot(lambda_range, eigvals[:,i], label=f'$E_{i+1}$')#color = '#4c72b0')
 plt.show()
+
+# Part g)
+
+def get_energy(angles, lmb, number_shots):
+    E, V, W = 1, lmb, 0
+    term1 = W * (Id ^ Id)
+    term2 = (W-E) * (Pauli_Z ^ Id) #ZI -> IxI with x being the kroncker product
+    term3 = -(W+E) * (Id ^ Pauli_Z) #IZ -> SWAP
+    term4 = -W * (Pauli_Z ^ Pauli_Z) # can stay this way
+    term5 = np.sqrt(6)/2*V * (Id ^ Pauli_X) # IX -> (HxI)Swap
+    term6 = np.sqrt(6)/2*V * (Pauli_X ^ Id) # XI -> HxI
+    term7 = np.sqrt(6)/2*V * (Pauli_Z ^ Pauli_X) # ZX -> CNOT10 (IxH)
+    term8 = -np.sqrt(6)/2*V * (Pauli_X ^ Pauli_Z) # XZ -> CNOT10 (IxH) SWAP
+
+    H_135= term1+term2+term3+term4+term5+term6+term7+term8
+    H_24=3*W*Id-E*Pauli_Z+3*V*Pauli_X
+    
+    init_state = prepare_state(angles)
+
+    pauli_strings = ["ZI", "IZ", "ZZ", "IX", "XI", "ZX", "XZ"]
+    measurements = []
+    for p_str in pauli_strings:
+        qubit = transform_to_Z_basis(p_str) @ init_state
+        measurements.append(measure(qubit, ["00", "01", "10", "11"], number_shots))
+    
+    # expected value of ZI = (#00 + #01 - #10 - #11)/ number of shots
+    exp_vals = np.zeros(len(measurements)) # do not include the expectation value of II
+    constants = np.array([(W-E), -(W+E), -W, np.sqrt(6)/2*V, np.sqrt(6)/2*V, np.sqrt(6)/2*V, -np.sqrt(6)/2*V])
+    for index in range(len(exp_vals)):
+        exp_vals[index] = measurements[index]["00"] + measurements[index]["01"] - measurements[index]["10"] - measurements[index]["11"]
+    exp_val = W + np.sum(constants * exp_vals) / number_shots
+    return exp_val
+
+VQE(5)
