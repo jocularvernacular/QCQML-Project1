@@ -157,9 +157,6 @@ c = (V_11 + V_22) / 2
 omega_z = (V_11 - V_22) / 2
 omega_x = V_12
 
-def H(lambd):
-    return H_0 + lambd * H_1
-
 def Rx(theta):
     return np.cos(theta/2) * Id - 1j * np.sin(theta/2) * Pauli_X
 
