@@ -7,34 +7,20 @@ Pauli_Y = np.array([[0, -1j], [1j, 0]])
 Pauli_Z = np.array([[1, 0], [0, -1]])
 Id = np.array([[1, 0], [0, 1]])
 
-def apply_pauli_matrices(basis_state):
-
-    results = {
-        "X": np.dot(Pauli_X, basis_state),
-        "Y": np.dot(Pauli_Y, basis_state),
-        "Z": np.dot(Pauli_Z, basis_state)
-    }
-    return results
-
-def print_pauli_results():
-    print("Basis state |0>:")
+def apply_pauli_matrices_to_state(state, name):
+    matrices = [Pauli_X, Pauli_Y, Pauli_Z]
+    print("Basis state |" + name + ">:")
     print(basis_0)
-    print("\nApplying Pauli matrices to |0>:")
-    results_0 = apply_pauli_matrices(basis_0)
-    for matrix, result in results_0.items():
-        print(f"{matrix} |0> = {result}")
+    print("\nApplying Pauli matrices to |" + name + ">:")
+    for matrix in matrices:
+        print(f"{matrix} |0> = {matrix @ state}")
 
-    print("\nBasis state |1>:")
-    print(basis_1)
-    print("\nApplying Pauli matrices to |1>:")
-    results_1 = apply_pauli_matrices(basis_1)
-    for matrix, result in results_1.items():
-        print(f"{matrix} |1> = {result}")
+apply_pauli_matrices_to_state(basis_0, "0")
+apply_pauli_matrices_to_state(basis_1, "1")
 
-print_pauli_results()
-
-def print_section_divider():
+def print_section_divider(exercise_name=""):
     print("-----------------------------------")
+    print(exercise_name)
 
 print_section_divider()
 
@@ -43,17 +29,26 @@ Hadamard = (1 / sqrt(2)) * np.array([[1, 1], [1, -1]])
 
 def apply_phase(phase, state):
     gate = np.array([[1, 0], [0, np.exp(1j * phase)]])
-    return np.dot(gate, state)
+    return gate @ state
 
-def apply_and_print(func, name, basis_0, basis_1):
+def print_result(func, name):
     result_0 = func(basis_0)
     result_1 = func(basis_1)
     print(name + " :")
     print(f"|0> = {result_0}")
     print(f"|1> = {result_1}")
 
-apply_and_print(lambda state: Hadamard * state, "Hadamard", basis_0, basis_1)
-apply_and_print(lambda state: apply_phase(np.pi, state), "Phase", basis_0, basis_1)
+print_result(lambda state: Hadamard * state, "Hadamard")
+print_result(lambda state: apply_phase(np.pi, state), "Phase")
+
+print("With Qiskit")
+def hadamard_phase_effects():
+    qc = QuantumCircuit(1)
+    qc.h(0)
+    qc.s(0)
+    print("Hadamard followed by Phase Gate:")
+    print(qc)
+
 print_section_divider()
 
 # Now the bell states and CNOT stuff:
@@ -66,14 +61,23 @@ CNOT = np.array([[1,0,0,0],
                  [0,1,0,0],
                  [0,0,0,1],
                  [0,0,1,0]])
+CNOT_10 = np.array([[1,0,0,0],
+                 [0,0,0,1],
+                 [0,0,1,0],
+                 [0,1,0,0]])
+SWAP = np.array([[1,0,0,0],
+                 [0,0,1,0],
+                 [0,1,0,0],
+                 [0,0,0,1]])
+S_dag = np.array([[1, 0], [0, -1j]])
 
-hadamard_4D = np.kron(Hadamard, np.identity(2))
+hadamard_4D = np.kron(Hadamard, Id)
 
 def apply_hadamard_and_cnot():
-    bell_hadamard = np.dot(hadamard_4D, bell_phi_p)
+    bell_hadamard = hadamard_4D @ bell_phi_p
     print("Hadamard applied to Bell state Phi+: ")
     print(bell_hadamard)
-    bell_hadamard_cnot = np.dot(CNOT, bell_hadamard)
+    bell_hadamard_cnot = CNOT @ bell_hadamard
     print("CNOT + Hadamard applied to Bell state Phi+: ")
     print(bell_hadamard_cnot)
     return bell_hadamard_cnot
@@ -88,7 +92,7 @@ def measure(state, basis, shots):
 
 bell_hadamard_cnot = apply_hadamard_and_cnot()
 results = measure(bell_hadamard_cnot, ["00", "01", "10", "11"], 10000)
-print(results)
+print(results) # Notably, all qubits had the same amplitude, so they all have roughly been measured an equal amount
 print_section_divider()
 
 import qiskit as qk
@@ -112,6 +116,11 @@ def measure_bell_state(repetitions=10000):
     results = job.result().get_counts()
     return results
 
+print("With qiskit:")
+print(measure_bell_state())
+
+
+print_section_divider("Part b)")
 ### Part b)
 import matplotlib.pyplot as plt
 
@@ -130,7 +139,9 @@ def plot_eigenvalues():
     plt.plot(lambda_range, y_e2)
     plt.legend(["E1", "E2"])
     plt.show()
+plot_eigenvalues()
 
+print_section_divider("Part c)")
 ### Part c)
 
 # Constants
@@ -148,8 +159,6 @@ omega_x = V_12
 
 def H(lambd):
     return H_0 + lambd * H_1
-
-from scipy.optimize import minimize
 
 def Rx(theta):
     return np.cos(theta/2) * Id - 1j * np.sin(theta/2) * Pauli_X
@@ -169,6 +178,23 @@ def prepare_state_1_qubit(args):
 def prepare_Hamiltonian(x=0, y=0, z=0, I=0):
     return (x * Pauli_X) + (y * Pauli_Y) + (z * Pauli_Z) + (I * Id)
 
+def transform_to_Z_basis(pauli_string):
+    gates = {
+        "X": Hadamard,
+        "ZI": np.kron(Id, Id),
+        "IZ": SWAP,
+        "XI": np.kron(Hadamard, Id),
+        "IX": np.kron(Hadamard, Id) @ SWAP,
+        "YI": np.kron(S_dag @ Hadamard, Id),
+        "IY": np.kron(S_dag @ Hadamard, Id) @ SWAP,
+        "ZZ": CNOT_10,
+        "XX": CNOT_10 @ np.kron(Hadamard, Hadamard),
+        "YY": CNOT_10 @ np.kron(S_dag @ Hadamard, S_dag @ Hadamard),
+        "ZX": CNOT_10 @ np.kron(Id, Hadamard),
+        "XZ": CNOT_10 @ np.kron(Id, Hadamard) @ SWAP
+    }
+    return gates.get(pauli_string, None)
+
 H_0 = prepare_Hamiltonian(z=omega, I=eps)
 H_1 = prepare_Hamiltonian(x=omega_x, z=omega_z, I=c)
 
@@ -184,7 +210,7 @@ def get_energy(angles, lmb, number_shots):
     # number of 1 measurements = sum(measure_z)
     exp_val_z = (omega + lmb*omega_z)*(number_shots - 2*measure_z["1"]) / number_shots
 
-    measure_x = measure(np.matmul(init_state, Hadamard), ["0", "1"], number_shots)
+    measure_x = measure(transform_to_Z_basis("X") @ init_state, ["0", "1"], number_shots)
     exp_val_x = lmb*omega_x*(number_shots - 2*measure_x["1"]) / number_shots
     
     exp_val_i = (eps + c*lmb)
@@ -213,6 +239,7 @@ def minimize_energy(lmb, number_shots, angles_0, learning_rate, max_epochs):
         epoch += 1
     return angles, epoch, (epoch < max_epochs), energy, delta_energy
 
+from scipy.optimize import minimize
 def minimize_energy_scipy(fnc):
     number_shots = 10_000
     min_energy = np.zeros(len(lambda_range))
@@ -244,7 +271,7 @@ def VQE(n_angles):
         if epochs[index] < (epochs[index-1] - 5):
             angles_0 = np.random.uniform(low = 0, high = np.pi, size = n_angles)
             angles, epochs[index], converged, min_energy[index], delta_energy = minimize_energy(lmb, number_shots_search, angles_0, learning_rate, max_epochs)
-        print(f'Lambda = {lmb}, Energy = {min_energy[index]}, Epochs = {epochs[index]}, Converged = {converged}, Delta Energy = {delta_energy}')
+        print(f'Lambda = {lmb}, Energy = {min_energy[index]}, Epochs = {epochs[index]}, Converged = {converged}, Delta Energy = {delta_energy}, Angles = {angles}')
     return min_energy
 
 def plot_results(min_energy_VQE, min_energy_scipy=np.array(0), eigvals_ana=np.array(0)):
@@ -261,6 +288,15 @@ def plot_results(min_energy_VQE, min_energy_scipy=np.array(0), eigvals_ana=np.ar
     plt.legend()
     plt.show()
 
+def perform_VQE_and_plot_results(n_angles, create_Hamiltonian_func):
+    min_energy = VQE(n_angles)
+    min_energy_scipy = minimize_energy_scipy(get_energy)
+    eigvals_ana = find_eigenvalues_scipy(create_Hamiltonian_func)
+    plot_results(min_energy_VQE=min_energy, min_energy_scipy=min_energy_scipy, eigvals_ana=eigvals_ana)
+
+perform_VQE_and_plot_results(4, create_Hamiltonian)
+
+print_section_divider("Part d)")
 # Part d)
 Hx = 2.0
 Hz = 3.0
@@ -308,40 +344,15 @@ def plot_energies_and_entropy():
     axs.set_ylabel('Entropy')
     axs.legend()
     plt.show()
+plot_energies_and_entropy()
 
+print_section_divider("Part e)")
 # Part e)
 def apply_to_qubit(operator, qubit_index):
     if qubit_index == 0:
         return np.kron(operator, Id)
     elif qubit_index == 1:
         return np.kron(Id, operator)
-    
-CNOT_10 = np.array([[1,0,0,0],
-                 [0,0,0,1],
-                 [0,0,1,0],
-                 [0,1,0,0]])
-SWAP = np.array([[1,0,0,0],
-                 [0,0,1,0],
-                 [0,1,0,0],
-                 [0,0,0,1]])
-S_dag = np.array([[1, 0], [0, -1j]])
-
-def transform_to_Z_basis(pauli_string):
-    gates = {
-        "X": Hadamard,
-        "ZI": np.kron(Id, Id),
-        "IZ": SWAP,
-        "XI": np.kron(Hadamard, Id),
-        "IX": np.kron(Hadamard, Id) @ SWAP,
-        "YI": np.kron(S_dag @ Hadamard, Id),
-        "IY": np.kron(S_dag @ Hadamard, Id) @ SWAP,
-        "ZZ": CNOT_10,
-        "XX": CNOT_10 @ np.kron(Hadamard, Hadamard),
-        "YY": CNOT_10 @ np.kron(S_dag @ Hadamard, S_dag @ Hadamard),
-        "ZX": CNOT_10 @ np.kron(Id, Hadamard),
-        "XZ": CNOT_10 @ np.kron(Id, Hadamard) @ SWAP
-    }
-    return gates.get(pauli_string, None)
 
 def prepare_state_2_qubit(args):
     theta0, phi0, theta1, phi1 = args[0], args[1], args[2], args[3]
@@ -381,8 +392,9 @@ def get_energy(angles, lmb, number_shots):
     exp_val = A + np.sum(constants * exp_vals) / number_shots
     return exp_val
 
-#VQE(4)
+perform_VQE_and_plot_results(4, create_Hamiltonian)
 
+print_section_divider("Part f)")
 # Part f)
 epsilon = 1
 H_0 = epsilon * np.diag([-2, -1, 0, 1, 2])
@@ -394,11 +406,12 @@ H_1[4, 2] = H_1[2, 0]
 H_1 = H_1 + H_1.T
 
 eigvals = find_eigenvalues_scipy(create_Hamiltonian)
-#fig, axs = plt.subplots(1, 1, figsize=(10, 10))
-#for i in range(5):
-    #axs.plot(lambda_range, eigvals[:,i], label=f'$E_{i+1}$')#color = '#4c72b0')
-#plt.show()
+fig, axs = plt.subplots(1, 1, figsize=(10, 10))
+for i in range(5):
+    axs.plot(lambda_range, eigvals[:,i], label=f'$E_{i+1}$')#color = '#4c72b0')
+plt.show()
 
+print_section_divider("Part g)")
 # Part g)
 E, W = 1, 0
 def Hamiltonian(lambd):
@@ -434,27 +447,18 @@ def get_energy(angles, lmb, number_shots):
     return exp_val
     
 
-#min_energy_H1 = VQE(4)
-#print(min_energy_H1)
-#min_energy_scipy_H1 = minimize_energy_scipy(get_energy)
-#eigvals_ana_H1 = find_eigenvalues_scipy(lambda lmb: Hamiltonian(lmb)[0])
-#plot_results(min_energy_VQE=min_energy_H1, eigvals_ana=eigvals_ana_H1)
+perform_VQE_and_plot_results(4, lambda lmb: Hamiltonian(lmb)[0])
 
 
 def get_energy(angles, lmb, number_shots):
     V = lmb
     # For the -1 and 1 measurements, the reduced matrix is a 4x4 matrix given by
     # 3W * I + E * Z + 3V * X
-    # Both I and Z are in the Z basis, so we only have to measure X
     init_state = prepare_state_1_qubit(angles)
     measure_z = measure(init_state, ["0", "1"], number_shots)
     exp_val_z = -E * (measure_z["0"] - measure_z["1"]) / number_shots
-    measure_x = measure(Hadamard @ init_state, ["0", "1"], number_shots)
+    measure_x = measure(transform_to_Z_basis("X") @ init_state, ["0", "1"], number_shots)
     exp_val_x = 3*V*(measure_x["0"] - measure_x["1"]) / number_shots
     return exp_val_x - exp_val_z + 3 * W
 
-min_energy_H2 = VQE(2)
-print(min_energy_H2)
-min_energy_scipy_H2 = minimize_energy_scipy(get_energy)
-eigvals_ana_H2 = find_eigenvalues_scipy(lambda lmb: Hamiltonian(lmb)[1])
-plot_results(min_energy_VQE=min_energy_H2, min_energy_scipy=min_energy_scipy_H2, eigvals_ana=eigvals_ana_H2)
+perform_VQE_and_plot_results(2, lambda lmb: Hamiltonian(lmb)[1])
