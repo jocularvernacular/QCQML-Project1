@@ -157,7 +157,7 @@ def Rx(theta):
 def Ry(phi):
     return np.cos(phi/2) * Id - 1j * np.sin(phi/2) * Pauli_Y
 
-def prepare_state(args):
+def prepare_state_1_qubit(args):
     state = np.array([1, 0])
     theta = args[0]
     phi = args[1]
@@ -172,12 +172,12 @@ def prepare_Hamiltonian(x=0, y=0, z=0, I=0):
 H_0 = prepare_Hamiltonian(z=omega, I=eps)
 H_1 = prepare_Hamiltonian(x=omega_x, z=omega_z, I=c)
 
-def Hamiltonian(H_0, H_1, lambd):
+def create_Hamiltonian(lambd):
     return H_0 + lambd * H_1
 
 def get_energy(angles, lmb, number_shots):
     theta, phi = angles[0], angles[1]
-    init_state = prepare_state([theta, phi])
+    init_state = prepare_state_1_qubit([theta, phi])
     
     measure_z = measure(init_state, ["0", "1"], number_shots)
     # expected value of Z = (number of 0 measurements - number of 1 measurements)/ number of shots
@@ -206,7 +206,7 @@ def minimize_energy(lmb, number_shots, angles_0, learning_rate, max_epochs):
             angles_temp[idx] -= np.pi
             E_minus = get_energy(angles_temp, lmb, number_shots)
             grad[idx] = (E_plus - E_minus)/2 
-        angles -= learning_rate*grad 
+        angles -= learning_rate*grad # TODO: consider if the second 4x4 matrix should be included here or calculated seperately
         new_energy = get_energy(angles, lmb, number_shots)
         delta_energy = np.abs(new_energy - energy)
         energy = new_energy
@@ -222,11 +222,12 @@ def minimize_energy_scipy(fnc):
         min_energy[index] = res.fun
     return min_energy
 
-def find_eigenvalues_scipy(n_angles):
-    eigvals = np.zeros((len(lambda_range), n_angles))
+def find_eigenvalues_scipy(hamiltonian_func):
+    h_len = len(hamiltonian_func(0))
+    eigvals = np.zeros((len(lambda_range), h_len))
     for index, lmb in enumerate(lambda_range):
-        H = Hamiltonian(H_0, H_1, lmb)
-        eigen, eigvecs = np.linalg.eigh(H)
+        H = hamiltonian_func(lmb)
+        eigen, _ = np.linalg.eigh(H)
         eigvals[index] = eigen
     return eigvals
 
@@ -244,16 +245,17 @@ def VQE(n_angles):
             angles_0 = np.random.uniform(low = 0, high = np.pi, size = n_angles)
             angles, epochs[index], converged, min_energy[index], delta_energy = minimize_energy(lmb, number_shots_search, angles_0, learning_rate, max_epochs)
         print(f'Lambda = {lmb}, Energy = {min_energy[index]}, Epochs = {epochs[index]}, Converged = {converged}, Delta Energy = {delta_energy}')
+    return min_energy
 
-    min_energy_scipy = minimize_energy_scipy(get_energy)
-
-    eigvals_ana = find_eigenvalues_scipy(n_angles)
-
+def plot_results(min_energy_VQE, min_energy_scipy=np.array(0), eigvals_ana=np.array(0)):
     fig, axs = plt.subplots(1, 1, figsize=(10, 10))
-    for i in range(n_angles):
-        axs.plot(lambda_range, eigvals_ana[:,i], label=f'$E_{i+1}$')#color = '#4c72b0')
-    axs.scatter(lambda_range, min_energy, label = 'VQE eigenvalues', color = '#dd8452')
-    axs.scatter(lambda_range, min_energy_scipy, label = 'VQE Scipy', color = '#55a868')
+    if eigvals_ana.any():
+        for i in range(len(eigvals_ana[0,:])):
+            axs.plot(lambda_range, eigvals_ana[:,i], label=f'$E_{i+1}$')#color = '#4c72b0')
+    if min_energy_VQE.any():
+        axs.scatter(lambda_range, min_energy_VQE, label = 'VQE eigenvalues', color = '#dd8452')
+    if min_energy_scipy.any():
+        axs.scatter(lambda_range, min_energy_scipy, label = 'VQE Scipy', color = '#55a868')
     axs.set_xlabel(r'$\lambda$')
     axs.set_ylabel('Energy')
     plt.legend()
@@ -280,7 +282,7 @@ def trace_out(state, index):
 eigenvalues = []
 entropy = np.zeros((len(lambda_range), 4))
 for index, lmb in enumerate(lambda_range):
-    Hamilt = Hamiltonian(H_0, H_1, lmb)
+    Hamilt = create_Hamiltonian(lmb)
     eigvals, eigvecs = np.linalg.eigh(Hamilt)
     eigenvalues.append(eigvals)
     for i in range(4):
@@ -341,7 +343,7 @@ def transform_to_Z_basis(pauli_string):
     }
     return gates.get(pauli_string, None)
 
-def prepare_state(args):
+def prepare_state_2_qubit(args):
     theta0, phi0, theta1, phi1 = args[0], args[1], args[2], args[3]
     qubit = np.array([1, 0, 0, 0])
     Rx0 = Rx(theta0)
@@ -363,19 +365,11 @@ def get_energy(angles, lmb, number_shots):
     C = (eps00 + eps01 - eps10 - eps11) / 4.0
     D = (eps00 - eps01 - eps10 + eps11) / 4.0
     
-    init_state = prepare_state(angles)
+    init_state = prepare_state_2_qubit(angles)
 
-    ZI = np.kron(Pauli_Z, Id)
-
-    qubit = SWAP @ init_state # rotate measurement basis
     measure_iz = measure(transform_to_Z_basis("IZ") @ init_state, ["00", "01", "10", "11"], number_shots)
-
     measure_zi = measure(init_state, ["00", "01", "10", "11"], number_shots)
-    
-    qubit = CNOT_10 @ init_state
     measure_zz = measure(transform_to_Z_basis("ZZ") @ init_state, ["00", "01", "10", "11"], number_shots)
-    
-    qubit = CNOT_10 @ apply_to_qubit(Hadamard, 1) @ apply_to_qubit(Hadamard, 0) @ init_state
     measure_xx = measure(transform_to_Z_basis("XX") @ init_state, ["00", "01", "10", "11"], number_shots)
     
     # expected value of ZI = (#00 + #01 - #10 - #11)/ number of shots
@@ -390,7 +384,7 @@ def get_energy(angles, lmb, number_shots):
 #VQE(4)
 
 # Part f)
-epsilon = 0.5
+epsilon = 1
 H_0 = epsilon * np.diag([-2, -1, 0, 1, 2])
 
 H_1 = np.zeros((5, 5))
@@ -399,30 +393,32 @@ H_1[3, 1] = 3
 H_1[4, 2] = H_1[2, 0]
 H_1 = H_1 + H_1.T
 
-eigvals = find_eigenvalues_scipy(5)
-fig, axs = plt.subplots(1, 1, figsize=(10, 10))
-for i in range(5):
-    axs.plot(lambda_range, eigvals[:,i], label=f'$E_{i+1}$')#color = '#4c72b0')
-plt.show()
+eigvals = find_eigenvalues_scipy(create_Hamiltonian)
+#fig, axs = plt.subplots(1, 1, figsize=(10, 10))
+#for i in range(5):
+    #axs.plot(lambda_range, eigvals[:,i], label=f'$E_{i+1}$')#color = '#4c72b0')
+#plt.show()
 
 # Part g)
-
-def get_energy(angles, lmb, number_shots):
-    E, V, W = 1, lmb, 0
-    term1 = W * (Id ^ Id)
-    term2 = (W-E) * (Pauli_Z ^ Id) #ZI -> IxI with x being the kroncker product
-    term3 = -(W+E) * (Id ^ Pauli_Z) #IZ -> SWAP
-    term4 = -W * (Pauli_Z ^ Pauli_Z) # can stay this way
-    term5 = np.sqrt(6)/2*V * (Id ^ Pauli_X) # IX -> (HxI)Swap
-    term6 = np.sqrt(6)/2*V * (Pauli_X ^ Id) # XI -> HxI
-    term7 = np.sqrt(6)/2*V * (Pauli_Z ^ Pauli_X) # ZX -> CNOT10 (IxH)
-    term8 = -np.sqrt(6)/2*V * (Pauli_X ^ Pauli_Z) # XZ -> CNOT10 (IxH) SWAP
-
+E, W = 1, 0
+def Hamiltonian(lambd):
+    V = lambd
+    term1 = W * np.kron(Id, Id)
+    term2 = (W-E) * np.kron(Pauli_Z, Id) #ZI -> IxI with x being the kroncker product
+    term3 = -(W+E) * np.kron(Id, Pauli_Z) #IZ -> SWAP
+    term4 = -W * np.kron(Pauli_Z, Pauli_Z) # can stay this way
+    term5 = np.sqrt(6)/2*V * np.kron(Id, Pauli_X) # IX -> (HxI)Swap
+    term6 = np.sqrt(6)/2*V * np.kron(Pauli_X, Id) # XI -> HxI
+    term7 = np.sqrt(6)/2*V * np.kron(Pauli_Z, Pauli_X) # ZX -> CNOT10 (IxH)
+    term8 = -np.sqrt(6)/2*V * np.kron(Pauli_X, Pauli_Z) # XZ -> CNOT10 (IxH) SWAP
+    
     H_135= term1+term2+term3+term4+term5+term6+term7+term8
     H_24=3*W*Id-E*Pauli_Z+3*V*Pauli_X
-    
-    init_state = prepare_state(angles)
+    return H_135, H_24
 
+def get_energy(angles, lmb, number_shots):
+    V = lmb
+    init_state = prepare_state_2_qubit(angles)
     pauli_strings = ["ZI", "IZ", "ZZ", "IX", "XI", "ZX", "XZ"]
     measurements = []
     for p_str in pauli_strings:
@@ -436,5 +432,29 @@ def get_energy(angles, lmb, number_shots):
         exp_vals[index] = measurements[index]["00"] + measurements[index]["01"] - measurements[index]["10"] - measurements[index]["11"]
     exp_val = W + np.sum(constants * exp_vals) / number_shots
     return exp_val
+    
 
-VQE(5)
+#min_energy_H1 = VQE(4)
+#print(min_energy_H1)
+#min_energy_scipy_H1 = minimize_energy_scipy(get_energy)
+#eigvals_ana_H1 = find_eigenvalues_scipy(lambda lmb: Hamiltonian(lmb)[0])
+#plot_results(min_energy_VQE=min_energy_H1, eigvals_ana=eigvals_ana_H1)
+
+
+def get_energy(angles, lmb, number_shots):
+    V = lmb
+    # For the -1 and 1 measurements, the reduced matrix is a 4x4 matrix given by
+    # 3W * I + E * Z + 3V * X
+    # Both I and Z are in the Z basis, so we only have to measure X
+    init_state = prepare_state_1_qubit(angles)
+    measure_z = measure(init_state, ["0", "1"], number_shots)
+    exp_val_z = -E * (measure_z["0"] - measure_z["1"]) / number_shots
+    measure_x = measure(Hadamard @ init_state, ["0", "1"], number_shots)
+    exp_val_x = 3*V*(measure_x["0"] - measure_x["1"]) / number_shots
+    return exp_val_x - exp_val_z + 3 * W
+
+min_energy_H2 = VQE(2)
+print(min_energy_H2)
+min_energy_scipy_H2 = minimize_energy_scipy(get_energy)
+eigvals_ana_H2 = find_eigenvalues_scipy(lambda lmb: Hamiltonian(lmb)[1])
+plot_results(min_energy_VQE=min_energy_H2, min_energy_scipy=min_energy_scipy_H2, eigvals_ana=eigvals_ana_H2)
